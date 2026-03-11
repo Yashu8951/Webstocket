@@ -8,7 +8,7 @@ using System.Collections.Concurrent;
 
 var builder = WebApplication.CreateBuilder(args);
 
-/// Railway PORT configuration
+/// Railway port configuration
 var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
 builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 
@@ -28,7 +28,7 @@ app.UseWebSockets(new WebSocketOptions
     KeepAliveInterval = TimeSpan.FromSeconds(120)
 });
 
-/// Health check route
+/// Health endpoint
 app.MapGet("/", () => "WebSocket server running");
 
 /// Store connected clients
@@ -48,7 +48,7 @@ app.Map("/ws", async (HttpContext context, AppDbContext db) =>
     var clientId = Guid.NewGuid();
     clients.TryAdd(clientId, socket);
 
-    Console.WriteLine("Client Connected");
+    Console.WriteLine($"Client Connected: {clientId}");
 
     await SendItems(socket, db);
 
@@ -56,117 +56,140 @@ app.Map("/ws", async (HttpContext context, AppDbContext db) =>
 
     while (socket.State == WebSocketState.Open)
     {
-        var result = await socket.ReceiveAsync(buffer, CancellationToken.None);
-
-        if (result.MessageType == WebSocketMessageType.Close)
+        try
         {
-            clients.TryRemove(clientId, out _);
+            var result = await socket.ReceiveAsync(buffer, CancellationToken.None);
 
-            await socket.CloseAsync(
-                WebSocketCloseStatus.NormalClosure,
-                "Closed",
-                CancellationToken.None);
-
-            Console.WriteLine("Client Disconnected");
-            break;
-        }
-
-        var message = Encoding.UTF8.GetString(buffer, 0, result.Count);
-        bool changed = false;
-
-        var doc = JsonDocument.Parse(message);
-
-        if (doc.RootElement.TryGetProperty("action", out var action))
-        {
-            var act = action.GetString();
-
-            if (act == "all_on")
+            if (result.MessageType == WebSocketMessageType.Close)
             {
-                var items = await db.Kiran.ToListAsync();
+                clients.TryRemove(clientId, out _);
 
-                foreach (var i in items)
-                    i.Status = 1;
+                await socket.CloseAsync(
+                    WebSocketCloseStatus.NormalClosure,
+                    "Closed",
+                    CancellationToken.None);
 
-                await db.SaveChangesAsync();
-                changed = true;
+                Console.WriteLine($"Client Disconnected: {clientId}");
+                break;
             }
 
-            if (act == "all_off")
+            var message = Encoding.UTF8.GetString(buffer, 0, result.Count);
+            Console.WriteLine($"Message Received: {message}");
+
+            bool changed = false;
+
+            var doc = JsonDocument.Parse(message);
+
+            if (doc.RootElement.TryGetProperty("action", out var action))
             {
-                var items = await db.Kiran.ToListAsync();
+                var act = action.GetString();
 
-                foreach (var i in items)
-                    i.Status = 0;
-
-                await db.SaveChangesAsync();
-                changed = true;
-            }
-        }
-        else
-        {
-            var data = JsonSerializer.Deserialize<Kiran>(message);
-
-            if (data != null)
-            {
-                var item = await db.Kiran
-                    .FirstOrDefaultAsync(x => x.ItemId == data.ItemId);
-
-                if (item != null)
+                if (act == "all_on")
                 {
-                    item.Status = data.Status;
+                    var items = await db.Kiran.ToListAsync();
+
+                    foreach (var i in items)
+                        i.Status = 1;
+
+                    await db.SaveChangesAsync();
+                    changed = true;
+                }
+
+                if (act == "all_off")
+                {
+                    var items = await db.Kiran.ToListAsync();
+
+                    foreach (var i in items)
+                        i.Status = 0;
+
                     await db.SaveChangesAsync();
                     changed = true;
                 }
             }
-        }
+            else
+            {
+                var data = JsonSerializer.Deserialize<Kiran>(message);
 
-        if (changed)
-            await Broadcast(db);
+                if (data != null)
+                {
+                    var item = await db.Kiran
+                        .FirstOrDefaultAsync(x => x.ItemId == data.ItemId);
+
+                    if (item != null)
+                    {
+                        item.Status = data.Status;
+                        await db.SaveChangesAsync();
+                        changed = true;
+                    }
+                }
+            }
+
+            if (changed)
+                await Broadcast(db);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"WebSocket Error: {ex.Message}");
+        }
     }
 });
 
 app.Run();
 
 
-/// Send database items to new client
+/// Send database items to a new client
 async Task SendItems(WebSocket socket, AppDbContext db)
 {
-    var items = await db.Kiran.ToListAsync();
+    try
+    {
+        var items = await db.Kiran.ToListAsync();
 
-    var json = JsonSerializer.Serialize(items);
-    var bytes = Encoding.UTF8.GetBytes(json);
+        var json = JsonSerializer.Serialize(items);
+        var bytes = Encoding.UTF8.GetBytes(json);
 
-    await socket.SendAsync(
-        bytes,
-        WebSocketMessageType.Text,
-        true,
-        CancellationToken.None);
+        await socket.SendAsync(
+            bytes,
+            WebSocketMessageType.Text,
+            true,
+            CancellationToken.None);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"SendItems Error: {ex.Message}");
+    }
 }
 
-/// Broadcast updates to all clients
+/// Broadcast updates to all connected clients
 async Task Broadcast(AppDbContext db)
 {
-    var items = await db.Kiran.ToListAsync();
-
-    var json = JsonSerializer.Serialize(items);
-    var bytes = Encoding.UTF8.GetBytes(json);
-
-    foreach (var client in clients.Values)
+    try
     {
-        if (client.State == WebSocketState.Open)
+        var items = await db.Kiran.ToListAsync();
+
+        var json = JsonSerializer.Serialize(items);
+        var bytes = Encoding.UTF8.GetBytes(json);
+
+        foreach (var client in clients.Values)
         {
-            try
+            if (client.State == WebSocketState.Open)
             {
-                await client.SendAsync(
-                    bytes,
-                    WebSocketMessageType.Text,
-                    true,
-                    CancellationToken.None);
-            }
-            catch
-            {
-                // ignore broken connections
+                try
+                {
+                    await client.SendAsync(
+                        bytes,
+                        WebSocketMessageType.Text,
+                        true,
+                        CancellationToken.None);
+                }
+                catch
+                {
+                    // ignore broken connections
+                }
             }
         }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Broadcast Error: {ex.Message}");
     }
 }
