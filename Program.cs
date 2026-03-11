@@ -8,7 +8,7 @@ using System.Collections.Concurrent;
 
 var builder = WebApplication.CreateBuilder(args);
 
-/// Railway port configuration
+/// Railway PORT
 var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
 builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 
@@ -28,10 +28,9 @@ app.UseWebSockets(new WebSocketOptions
     KeepAliveInterval = TimeSpan.FromSeconds(120)
 });
 
-/// Health endpoint
+/// Health route
 app.MapGet("/", () => "WebSocket server running");
 
-/// Store connected clients
 ConcurrentDictionary<Guid, WebSocket> clients = new();
 
 app.Map("/ws", async (HttpContext context, AppDbContext db) =>
@@ -39,7 +38,7 @@ app.Map("/ws", async (HttpContext context, AppDbContext db) =>
     if (!context.WebSockets.IsWebSocketRequest)
     {
         context.Response.StatusCode = 400;
-        await context.Response.WriteAsync("WebSocket requests only");
+        await context.Response.WriteAsync("WebSocket only");
         return;
     }
 
@@ -74,7 +73,8 @@ app.Map("/ws", async (HttpContext context, AppDbContext db) =>
             }
 
             var message = Encoding.UTF8.GetString(buffer, 0, result.Count);
-            Console.WriteLine($"Message Received: {message}");
+
+            Console.WriteLine("Message received: " + message);
 
             bool changed = false;
 
@@ -129,7 +129,7 @@ app.Map("/ws", async (HttpContext context, AppDbContext db) =>
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"WebSocket Error: {ex.Message}");
+            Console.WriteLine("WebSocket error: " + ex.Message);
         }
     }
 });
@@ -137,7 +137,7 @@ app.Map("/ws", async (HttpContext context, AppDbContext db) =>
 app.Run();
 
 
-/// Send database items to a new client
+/// Send items to new client
 async Task SendItems(WebSocket socket, AppDbContext db)
 {
     try
@@ -145,6 +145,9 @@ async Task SendItems(WebSocket socket, AppDbContext db)
         var items = await db.Kiran.ToListAsync();
 
         var json = JsonSerializer.Serialize(items);
+
+        Console.WriteLine("Sending items: " + json);
+
         var bytes = Encoding.UTF8.GetBytes(json);
 
         await socket.SendAsync(
@@ -155,11 +158,19 @@ async Task SendItems(WebSocket socket, AppDbContext db)
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"SendItems Error: {ex.Message}");
+        Console.WriteLine("DB ERROR: " + ex.Message);
+
+        var empty = Encoding.UTF8.GetBytes("[]");
+
+        await socket.SendAsync(
+            empty,
+            WebSocketMessageType.Text,
+            true,
+            CancellationToken.None);
     }
 }
 
-/// Broadcast updates to all connected clients
+/// Broadcast updates
 async Task Broadcast(AppDbContext db)
 {
     try
@@ -167,29 +178,23 @@ async Task Broadcast(AppDbContext db)
         var items = await db.Kiran.ToListAsync();
 
         var json = JsonSerializer.Serialize(items);
+
         var bytes = Encoding.UTF8.GetBytes(json);
 
         foreach (var client in clients.Values)
         {
             if (client.State == WebSocketState.Open)
             {
-                try
-                {
-                    await client.SendAsync(
-                        bytes,
-                        WebSocketMessageType.Text,
-                        true,
-                        CancellationToken.None);
-                }
-                catch
-                {
-                    // ignore broken connections
-                }
+                await client.SendAsync(
+                    bytes,
+                    WebSocketMessageType.Text,
+                    true,
+                    CancellationToken.None);
             }
         }
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"Broadcast Error: {ex.Message}");
+        Console.WriteLine("Broadcast error: " + ex.Message);
     }
 }
