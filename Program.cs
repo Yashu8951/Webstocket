@@ -14,32 +14,16 @@ var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
 builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 
 /// DATABASE CONNECTION (Supabase + Railway fix)
-var databaseUrl = Environment.GetEnvironmentVariable("DATABASE_URL");
+/// Database connection
+var connection = Environment.GetEnvironmentVariable("DATABASE_URL");
 
-if (!string.IsNullOrEmpty(databaseUrl))
+if (string.IsNullOrEmpty(connection))
 {
-    var uri = new Uri(databaseUrl);
-    var userInfo = uri.UserInfo.Split(':');
-
-    var connectionBuilder = new NpgsqlConnectionStringBuilder
-    {
-        Host = uri.Host,
-        Port = uri.Port,
-        Database = uri.AbsolutePath.Trim('/'),
-        Username = userInfo[0],
-        Password = userInfo[1],
-        SslMode = SslMode.Require,
-        TrustServerCertificate = true
-    };
-
-    builder.Services.AddDbContext<AppDbContext>(opt =>
-        opt.UseNpgsql(connectionBuilder.ConnectionString));
+    connection = builder.Configuration.GetConnectionString("DefaultConnection");
 }
-else
-{
-    builder.Services.AddDbContext<AppDbContext>(opt =>
-        opt.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
-}
+
+builder.Services.AddDbContext<AppDbContext>(opt =>
+    opt.UseNpgsql(connection));
 
 var app = builder.Build();
 
