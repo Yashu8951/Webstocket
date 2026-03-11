@@ -28,13 +28,20 @@ app.UseWebSockets(new WebSocketOptions
     KeepAliveInterval = TimeSpan.FromSeconds(120)
 });
 
+/// Health check route
+app.MapGet("/", () => "WebSocket server running");
+
 /// Store connected clients
 ConcurrentDictionary<Guid, WebSocket> clients = new();
 
 app.Map("/ws", async (HttpContext context, AppDbContext db) =>
 {
     if (!context.WebSockets.IsWebSocketRequest)
+    {
+        context.Response.StatusCode = 400;
+        await context.Response.WriteAsync("WebSocket requests only");
         return;
+    }
 
     var socket = await context.WebSockets.AcceptWebSocketAsync();
 
@@ -107,7 +114,6 @@ app.Map("/ws", async (HttpContext context, AppDbContext db) =>
                 if (item != null)
                 {
                     item.Status = data.Status;
-
                     await db.SaveChangesAsync();
                     changed = true;
                 }
@@ -159,7 +165,7 @@ async Task Broadcast(AppDbContext db)
             }
             catch
             {
-                // Ignore broken sockets
+                // ignore broken connections
             }
         }
     }
