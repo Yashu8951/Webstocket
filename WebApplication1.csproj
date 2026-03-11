@@ -5,7 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
 
-    <!-- Disable analyzers that cause Railway build failures -->
+    <!-- Disable analyzers -->
     <EnableNETAnalyzers>false</EnableNETAnalyzers>
     <AnalysisLevel>none</AnalysisLevel>
   </PropertyGroup>
