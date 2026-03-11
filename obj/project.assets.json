@@ -15,28 +15,6 @@
           }
         }
       },
-      "Microsoft.AspNetCore.OpenApi/10.0.3": {
-        "type": "package",
-        "dependencies": {
-          "Microsoft.OpenApi": "2.0.0"
-        },
-        "compile": {
-          "lib/net10.0/Microsoft.AspNetCore.OpenApi.dll": {
-            "related": ".xml"
-          }
-        },
-        "runtime": {
-          "lib/net10.0/Microsoft.AspNetCore.OpenApi.dll": {
-            "related": ".xml"
-          }
-        },
-        "frameworkReferences": [
-          "Microsoft.AspNetCore.App"
-        ],
-        "build": {
-          "build/Microsoft.AspNetCore.OpenApi.targets": {}
-        }
-      },
       "Microsoft.Build/17.7.2": {
         "type": "package",
         "dependencies": {
@@ -554,19 +532,6 @@
           }
         }
       },
-      "Microsoft.OpenApi/2.0.0": {
-        "type": "package",
-        "compile": {
-          "lib/net8.0/Microsoft.OpenApi.dll": {
-            "related": ".pdb;.xml"
-          }
-        },
-        "runtime": {
-          "lib/net8.0/Microsoft.OpenApi.dll": {
-            "related": ".pdb;.xml"
-          }
-        }
-      },
       "Mono.TextTemplating/3.0.0": {
         "type": "package",
         "dependencies": {
@@ -917,24 +882,6 @@
         "lib/netstandard2.0/Humanizer.dll",
         "lib/netstandard2.0/Humanizer.xml",
         "logo.png"
-      ]
-    },
-    "Microsoft.AspNetCore.OpenApi/10.0.3": {
-      "sha512": "SAvSrKDgnY5GDjDAngOXxPhUvEKlTU/0zIq8zidqHvh/xnZBPs0Vc4LqwyvnmnafNnyUaivtRABz4K4wodXfSg==",
-      "type": "package",
-      "path": "microsoft.aspnetcore.openapi/10.0.3",
-      "files": [
-        ".nupkg.metadata",
-        ".signature.p7s",
-        "Icon.png",
-        "PACKAGE.md",
-        "THIRD-PARTY-NOTICES.TXT",
-        "analyzers/dotnet/cs/Microsoft.AspNetCore.OpenApi.SourceGenerators.dll",
-        "build/Microsoft.AspNetCore.OpenApi.targets",
-        "lib/net10.0/Microsoft.AspNetCore.OpenApi.dll",
-        "lib/net10.0/Microsoft.AspNetCore.OpenApi.xml",
-        "microsoft.aspnetcore.openapi.10.0.3.nupkg.sha512",
-        "microsoft.aspnetcore.openapi.nuspec"
       ]
     },
     "Microsoft.Build/17.7.2": {
@@ -2254,24 +2201,6 @@
         "ref/netstandard2.0/Microsoft.NET.StringTools.xml"
       ]
     },
-    "Microsoft.OpenApi/2.0.0": {
-      "sha512": "GGYLfzV/G/ct80OZ45JxnWP7NvMX1BCugn/lX7TH5o0lcVaviavsLMTxmFV2AybXWjbi3h6FF1vgZiTK6PXndw==",
-      "type": "package",
-      "path": "microsoft.openapi/2.0.0",
-      "files": [
-        ".nupkg.metadata",
-        ".signature.p7s",
-        "README.md",
-        "lib/net8.0/Microsoft.OpenApi.dll",
-        "lib/net8.0/Microsoft.OpenApi.pdb",
-        "lib/net8.0/Microsoft.OpenApi.xml",
-        "lib/netstandard2.0/Microsoft.OpenApi.dll",
-        "lib/netstandard2.0/Microsoft.OpenApi.pdb",
-        "lib/netstandard2.0/Microsoft.OpenApi.xml",
-        "microsoft.openapi.2.0.0.nupkg.sha512",
-        "microsoft.openapi.nuspec"
-      ]
-    },
     "Mono.TextTemplating/3.0.0": {
       "sha512": "YqueG52R/Xej4VVbKuRIodjiAhV0HR/XVbLbNrJhCZnzjnSjgMJ/dCdV0akQQxavX6hp/LC6rqLGLcXeQYU7XA==",
       "type": "package",
@@ -2776,7 +2705,6 @@
   },
   "projectFileDependencyGroups": {
     "net10.0": [
-      "Microsoft.AspNetCore.OpenApi >= 10.0.3",
       "Microsoft.EntityFrameworkCore >= 10.0.0",
       "Microsoft.EntityFrameworkCore.Tools >= 10.0.0",
       "Npgsql.EntityFrameworkCore.PostgreSQL >= 10.0.0"
@@ -2825,10 +2753,6 @@
       "net10.0": {
         "targetAlias": "net10.0",
         "dependencies": {
-          "Microsoft.AspNetCore.OpenApi": {
-            "target": "Package",
-            "version": "[10.0.3, )"
-          },
           "Microsoft.EntityFrameworkCore": {
             "target": "Package",
             "version": "[10.0.0, )"
