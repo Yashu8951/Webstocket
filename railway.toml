@@ -1,0 +1,8 @@
+[build]
+builder = "NIXPACKS"
+
+[phases.build]
+cmds = ["dotnet publish -c Release -o out"]
+
+[start]
+cmd = "dotnet out/WebApplication1.dll"
