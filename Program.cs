@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using WebApplication1.Data;
 using WebApplication1.Models;
 using System.Collections.Concurrent;
+using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -12,13 +13,33 @@ var builder = WebApplication.CreateBuilder(args);
 var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
 builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 
-/// Database connection
-var connection =
-    Environment.GetEnvironmentVariable("DATABASE_URL") ??
-    builder.Configuration.GetConnectionString("DefaultConnection");
+/// DATABASE CONNECTION (Supabase + Railway fix)
+var databaseUrl = Environment.GetEnvironmentVariable("DATABASE_URL");
 
-builder.Services.AddDbContext<AppDbContext>(opt =>
-    opt.UseNpgsql(connection));
+if (!string.IsNullOrEmpty(databaseUrl))
+{
+    var uri = new Uri(databaseUrl);
+    var userInfo = uri.UserInfo.Split(':');
+
+    var connectionBuilder = new NpgsqlConnectionStringBuilder
+    {
+        Host = uri.Host,
+        Port = uri.Port,
+        Database = uri.AbsolutePath.Trim('/'),
+        Username = userInfo[0],
+        Password = userInfo[1],
+        SslMode = SslMode.Require,
+        TrustServerCertificate = true
+    };
+
+    builder.Services.AddDbContext<AppDbContext>(opt =>
+        opt.UseNpgsql(connectionBuilder.ConnectionString));
+}
+else
+{
+    builder.Services.AddDbContext<AppDbContext>(opt =>
+        opt.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+}
 
 var app = builder.Build();
 
@@ -28,7 +49,7 @@ app.UseWebSockets(new WebSocketOptions
     KeepAliveInterval = TimeSpan.FromSeconds(120)
 });
 
-/// Health route
+/// Health check route
 app.MapGet("/", () => "WebSocket server running");
 
 ConcurrentDictionary<Guid, WebSocket> clients = new();
@@ -137,7 +158,7 @@ app.Map("/ws", async (HttpContext context, AppDbContext db) =>
 app.Run();
 
 
-/// Send items to new client
+/// Send items when client connects
 async Task SendItems(WebSocket socket, AppDbContext db)
 {
     try
@@ -170,7 +191,8 @@ async Task SendItems(WebSocket socket, AppDbContext db)
     }
 }
 
-/// Broadcast updates
+
+/// Broadcast updates to all clients
 async Task Broadcast(AppDbContext db)
 {
     try
