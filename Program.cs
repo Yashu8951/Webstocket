@@ -7,24 +7,49 @@ using WebApplication1.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
+/// Railway requires binding to dynamic port
 var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
 builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 
-var connection = Environment.GetEnvironmentVariable("DATABASE_URL");
+/// Railway PostgreSQL URL
+var databaseUrl = Environment.GetEnvironmentVariable("DATABASE_URL");
+
+string connectionString = "";
+
+if (!string.IsNullOrEmpty(databaseUrl))
+{
+    var uri = new Uri(databaseUrl);
+    var userInfo = uri.UserInfo.Split(':');
+
+    connectionString =
+        $"Host={uri.Host};" +
+        $"Port={uri.Port};" +
+        $"Database={uri.AbsolutePath.TrimStart('/')};" +
+        $"Username={userInfo[0]};" +
+        $"Password={userInfo[1]};" +
+        $"SSL Mode=Require;Trust Server Certificate=true";
+}
 
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseNpgsql(connection));
+    options.UseNpgsql(connectionString));
 
 var app = builder.Build();
 
-app.UseWebSockets();
+/// Enable WebSockets
+app.UseWebSockets(new WebSocketOptions
+{
+    KeepAliveInterval = TimeSpan.FromSeconds(120)
+});
 
 app.MapGet("/", () => "WebSocket running");
 
 app.Map("/ws", async (HttpContext context, IServiceScopeFactory scopeFactory) =>
 {
     if (!context.WebSockets.IsWebSocketRequest)
+    {
+        context.Response.StatusCode = 400;
         return;
+    }
 
     var socket = await context.WebSockets.AcceptWebSocketAsync();
 
@@ -37,7 +62,9 @@ app.Map("/ws", async (HttpContext context, IServiceScopeFactory scopeFactory) =>
 
     try
     {
+        /// Send initial data
         var items = await db.Kiran.ToListAsync();
+
         var json = JsonSerializer.Serialize(items);
 
         await socket.SendAsync(
@@ -65,29 +92,38 @@ app.Map("/ws", async (HttpContext context, IServiceScopeFactory scopeFactory) =>
 
             Console.WriteLine("Received: " + message);
 
-            var data = JsonSerializer.Deserialize<Kiran>(message);
-
-            if (data != null)
+            try
             {
-                var item = await db.Kiran
-                    .FirstOrDefaultAsync(x => x.ItemId == data.ItemId);
+                var data = JsonSerializer.Deserialize<Kiran>(message);
 
-                if (item != null)
+                if (data != null)
                 {
-                    item.Status = data.Status;
-                    await db.SaveChangesAsync();
+                    var item = await db.Kiran
+                        .FirstOrDefaultAsync(x => x.ItemId == data.ItemId);
+
+                    if (item != null)
+                    {
+                        item.Status = data.Status;
+                        await db.SaveChangesAsync();
+                    }
                 }
+
+                /// Send updated data
+                var updated = await db.Kiran.ToListAsync();
+
+                var updatedJson = JsonSerializer.Serialize(updated);
+
+                await socket.SendAsync(
+                    Encoding.UTF8.GetBytes(updatedJson),
+                    WebSocketMessageType.Text,
+                    true,
+                    CancellationToken.None
+                );
             }
-
-            var updated = await db.Kiran.ToListAsync();
-            var updatedJson = JsonSerializer.Serialize(updated);
-
-            await socket.SendAsync(
-                Encoding.UTF8.GetBytes(updatedJson),
-                WebSocketMessageType.Text,
-                true,
-                CancellationToken.None
-            );
+            catch (Exception e)
+            {
+                Console.WriteLine("JSON Error: " + e.Message);
+            }
         }
     }
     catch (Exception ex)
@@ -97,6 +133,5 @@ app.Map("/ws", async (HttpContext context, IServiceScopeFactory scopeFactory) =>
 
     Console.WriteLine("Client disconnected");
 });
-// app.MapGet("/items", async (AppDbContext db) => await db.Kiran.ToListAsync());
 
 app.Run();
