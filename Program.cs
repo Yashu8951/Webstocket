@@ -15,11 +15,6 @@ builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 /// Database connection
 var connection = Environment.GetEnvironmentVariable("DATABASE_URL");
 
-if (string.IsNullOrEmpty(connection))
-{
-    connection = builder.Configuration.GetConnectionString("DefaultConnection");
-}
-
 builder.Services.AddDbContext<AppDbContext>(opt =>
     opt.UseNpgsql(connection));
 
@@ -58,80 +53,73 @@ app.Map("/ws", async (HttpContext context, AppDbContext db) =>
 
     while (socket.State == WebSocketState.Open)
     {
-        try
+        var result = await socket.ReceiveAsync(buffer, CancellationToken.None);
+
+        if (result.MessageType == WebSocketMessageType.Close)
         {
-            var result = await socket.ReceiveAsync(buffer, CancellationToken.None);
+            clients.TryRemove(clientId, out _);
 
-            if (result.MessageType == WebSocketMessageType.Close)
+            await socket.CloseAsync(
+                WebSocketCloseStatus.NormalClosure,
+                "Closed",
+                CancellationToken.None);
+
+            Console.WriteLine($"Client Disconnected: {clientId}");
+            break;
+        }
+
+        var message = Encoding.UTF8.GetString(buffer, 0, result.Count);
+
+        bool changed = false;
+
+        var doc = JsonDocument.Parse(message);
+
+        if (doc.RootElement.TryGetProperty("action", out var action))
+        {
+            var act = action.GetString();
+
+            if (act == "all_on")
             {
-                clients.TryRemove(clientId, out _);
+                var items = await db.Kiran.ToListAsync();
 
-                await socket.CloseAsync(
-                    WebSocketCloseStatus.NormalClosure,
-                    "Closed",
-                    CancellationToken.None);
+                foreach (var i in items)
+                    i.Status = 1;
 
-                Console.WriteLine($"Client Disconnected: {clientId}");
-                break;
+                await db.SaveChangesAsync();
+                changed = true;
             }
 
-            var message = Encoding.UTF8.GetString(buffer, 0, result.Count);
-
-            bool changed = false;
-
-            var doc = JsonDocument.Parse(message);
-
-            if (doc.RootElement.TryGetProperty("action", out var action))
+            if (act == "all_off")
             {
-                var act = action.GetString();
+                var items = await db.Kiran.ToListAsync();
 
-                if (act == "all_on")
+                foreach (var i in items)
+                    i.Status = 0;
+
+                await db.SaveChangesAsync();
+                changed = true;
+            }
+        }
+        else
+        {
+            var data = JsonSerializer.Deserialize<Kiran>(message);
+
+            if (data != null)
+            {
+                var item = await db.Kiran
+                    .FirstOrDefaultAsync(x => x.ItemId == data.ItemId);
+
+                if (item != null)
                 {
-                    var items = await db.Kiran.ToListAsync();
-
-                    foreach (var i in items)
-                        i.Status = 1;
-
+                    item.Status = data.Status;
                     await db.SaveChangesAsync();
                     changed = true;
                 }
-
-                if (act == "all_off")
-                {
-                    var items = await db.Kiran.ToListAsync();
-
-                    foreach (var i in items)
-                        i.Status = 0;
-
-                    await db.SaveChangesAsync();
-                    changed = true;
-                }
             }
-            else
-            {
-                var data = JsonSerializer.Deserialize<Kiran>(message);
-
-                if (data != null)
-                {
-                    var item = await db.Kiran
-                        .FirstOrDefaultAsync(x => x.ItemId == data.ItemId);
-
-                    if (item != null)
-                    {
-                        item.Status = data.Status;
-                        await db.SaveChangesAsync();
-                        changed = true;
-                    }
-                }
-            }
-
-            if (changed)
-                await Broadcast(db);
         }
-        catch (Exception ex)
-        {
-            Console.WriteLine("WebSocket error: " + ex.Message);
-        }
+
+        if (changed)
+            await Broadcast(db);
     }
 });
 
@@ -141,30 +129,17 @@ app.Run();
 /// Send items to new client
 async Task SendItems(WebSocket socket, AppDbContext db)
 {
-    try
-    {
-        var items = await db.Kiran.ToListAsync();
+    var items = await db.Kiran.ToListAsync();
 
-        var json = JsonSerializer.Serialize(items);
+    var json = JsonSerializer.Serialize(items);
 
-        var bytes = Encoding.UTF8.GetBytes(json);
+    var bytes = Encoding.UTF8.GetBytes(json);
 
-        await socket.SendAsync(
-            bytes,
-            WebSocketMessageType.Text,
-            true,
-            CancellationToken.None);
-    }
-    catch
-    {
-        var empty = Encoding.UTF8.GetBytes("[]");
-
-        await socket.SendAsync(
-            empty,
-            WebSocketMessageType.Text,
-            true,
-            CancellationToken.None);
-    }
+    await socket.SendAsync(
+        bytes,
+        WebSocketMessageType.Text,
+        true,
+        CancellationToken.None);
 }
 
 /// Broadcast updates
