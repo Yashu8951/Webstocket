@@ -21,7 +21,7 @@ app.UseWebSockets();
 
 app.MapGet("/", () => "WebSocket running");
 
-app.Map("/ws", async (HttpContext context, AppDbContext db) =>
+app.Map("/ws", async (HttpContext context, IServiceScopeFactory scopeFactory) =>
 {
     if (!context.WebSockets.IsWebSocketRequest)
         return;
@@ -30,13 +30,14 @@ app.Map("/ws", async (HttpContext context, AppDbContext db) =>
 
     Console.WriteLine("Client connected");
 
-    var buffer = new byte[1024];
+    var buffer = new byte[4096];
+
+    using var scope = scopeFactory.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
     try
     {
-        /// Send current data first
         var items = await db.Kiran.ToListAsync();
-
         var json = JsonSerializer.Serialize(items);
 
         await socket.SendAsync(
@@ -64,37 +65,29 @@ app.Map("/ws", async (HttpContext context, AppDbContext db) =>
 
             Console.WriteLine("Received: " + message);
 
-            try
-            {
-                var data = JsonSerializer.Deserialize<Kiran>(message);
+            var data = JsonSerializer.Deserialize<Kiran>(message);
 
-                if (data != null)
+            if (data != null)
+            {
+                var item = await db.Kiran
+                    .FirstOrDefaultAsync(x => x.ItemId == data.ItemId);
+
+                if (item != null)
                 {
-                    var item = await db.Kiran
-                        .FirstOrDefaultAsync(x => x.ItemId == data.ItemId);
-
-                    if (item != null)
-                    {
-                        item.Status = data.Status;
-                        await db.SaveChangesAsync();
-                    }
+                    item.Status = data.Status;
+                    await db.SaveChangesAsync();
                 }
-
-                var updated = await db.Kiran.ToListAsync();
-
-                var updatedJson = JsonSerializer.Serialize(updated);
-
-                await socket.SendAsync(
-                    Encoding.UTF8.GetBytes(updatedJson),
-                    WebSocketMessageType.Text,
-                    true,
-                    CancellationToken.None
-                );
             }
-            catch (Exception e)
-            {
-                Console.WriteLine("JSON Error: " + e.Message);
-            }
+
+            var updated = await db.Kiran.ToListAsync();
+            var updatedJson = JsonSerializer.Serialize(updated);
+
+            await socket.SendAsync(
+                Encoding.UTF8.GetBytes(updatedJson),
+                WebSocketMessageType.Text,
+                true,
+                CancellationToken.None
+            );
         }
     }
     catch (Exception ex)
