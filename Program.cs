@@ -12,7 +12,7 @@ var builder = WebApplication.CreateBuilder(args);
 var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
 builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 
-/// Railway PostgreSQL URL
+/// PostgreSQL URL from Railway
 var databaseUrl =
     Environment.GetEnvironmentVariable("DATABASE_URL") ??
     Environment.GetEnvironmentVariable("DATABASE_PUBLIC_URL") ??
@@ -23,7 +23,7 @@ if (string.IsNullOrEmpty(databaseUrl))
     throw new Exception("DATABASE_URL not found");
 }
 
-/// Convert URL format → Npgsql format
+/// Convert Railway URL → Npgsql format
 databaseUrl = databaseUrl.Replace("postgresql://", "postgres://");
 
 var uri = new Uri(databaseUrl);
@@ -42,7 +42,9 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 
 var app = builder.Build();
 
-/// Enable WebSockets
+/// WebSocket clients list
+var clients = new List<WebSocket>();
+
 app.UseWebSockets(new WebSocketOptions
 {
     KeepAliveInterval = TimeSpan.FromSeconds(120)
@@ -60,6 +62,8 @@ app.Map("/ws", async (HttpContext context, IServiceScopeFactory scopeFactory) =>
 
     var socket = await context.WebSockets.AcceptWebSocketAsync();
 
+    clients.Add(socket);
+
     Console.WriteLine("Client connected");
 
     var buffer = new byte[4096];
@@ -71,7 +75,6 @@ app.Map("/ws", async (HttpContext context, IServiceScopeFactory scopeFactory) =>
     {
         /// Send initial device list
         var items = await db.Kiran.ToListAsync();
-
         var json = JsonSerializer.Serialize(items);
 
         await socket.SendAsync(
@@ -103,7 +106,7 @@ app.Map("/ws", async (HttpContext context, IServiceScopeFactory scopeFactory) =>
             {
                 var doc = JsonDocument.Parse(message);
 
-                /// Handle ALL ON / ALL OFF
+                /// CONNECT ALL / DISCONNECT ALL
                 if (doc.RootElement.TryGetProperty("action", out var actionProp))
                 {
                     var action = actionProp.GetString();
@@ -133,7 +136,7 @@ app.Map("/ws", async (HttpContext context, IServiceScopeFactory scopeFactory) =>
                     }
                 }
 
-                /// Handle single device toggle
+                /// SINGLE DEVICE TOGGLE
                 else
                 {
                     var data = JsonSerializer.Deserialize<Kiran>(message);
@@ -151,17 +154,24 @@ app.Map("/ws", async (HttpContext context, IServiceScopeFactory scopeFactory) =>
                     }
                 }
 
-                /// Send updated list
+                /// GET UPDATED DATA
                 var updated = await db.Kiran.ToListAsync();
-
                 var updatedJson = JsonSerializer.Serialize(updated);
+                var bytes = Encoding.UTF8.GetBytes(updatedJson);
 
-                await socket.SendAsync(
-                    Encoding.UTF8.GetBytes(updatedJson),
-                    WebSocketMessageType.Text,
-                    true,
-                    CancellationToken.None
-                );
+                /// BROADCAST TO ALL CLIENTS
+                foreach (var client in clients.ToList())
+                {
+                    if (client.State == WebSocketState.Open)
+                    {
+                        await client.SendAsync(
+                            bytes,
+                            WebSocketMessageType.Text,
+                            true,
+                            CancellationToken.None
+                        );
+                    }
+                }
             }
             catch (Exception e)
             {
@@ -175,6 +185,8 @@ app.Map("/ws", async (HttpContext context, IServiceScopeFactory scopeFactory) =>
     }
 
     Console.WriteLine("Client disconnected");
+
+    clients.Remove(socket);
 });
 
 app.Run();
