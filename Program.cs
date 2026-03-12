@@ -5,7 +5,6 @@ using Microsoft.EntityFrameworkCore;
 using WebApplication1.Data;
 using WebApplication1.Models;
 using System.Collections.Concurrent;
-using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -13,32 +12,16 @@ var builder = WebApplication.CreateBuilder(args);
 var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
 builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 
-/// DATABASE CONNECTION (Supabase + Railway fix)
 /// Database connection
-var databaseUrl = Environment.GetEnvironmentVariable("DATABASE_URL");
+var connection = Environment.GetEnvironmentVariable("DATABASE_URL");
 
-if (!string.IsNullOrEmpty(databaseUrl))
+if (string.IsNullOrEmpty(connection))
 {
-    var uri = new Uri(databaseUrl);
-    var userInfo = uri.UserInfo.Split(':');
-
-    var connectionString =
-        $"Host={uri.Host};" +
-        $"Port={uri.Port};" +
-        $"Database={uri.AbsolutePath.Trim('/')};" +
-        $"Username={userInfo[0]};" +
-        $"Password={userInfo[1]};" +
-        $"SSL Mode=Require;" +
-        $"Trust Server Certificate=true";
-
-    builder.Services.AddDbContext<AppDbContext>(opt =>
-        opt.UseNpgsql(connectionString));
+    connection = builder.Configuration.GetConnectionString("DefaultConnection");
 }
-else
-{
-    builder.Services.AddDbContext<AppDbContext>(opt =>
-        opt.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
-}
+
+builder.Services.AddDbContext<AppDbContext>(opt =>
+    opt.UseNpgsql(connection));
 
 var app = builder.Build();
 
@@ -48,7 +31,7 @@ app.UseWebSockets(new WebSocketOptions
     KeepAliveInterval = TimeSpan.FromSeconds(120)
 });
 
-/// Health check route
+/// Health route
 app.MapGet("/", () => "WebSocket server running");
 
 ConcurrentDictionary<Guid, WebSocket> clients = new();
@@ -93,8 +76,6 @@ app.Map("/ws", async (HttpContext context, AppDbContext db) =>
             }
 
             var message = Encoding.UTF8.GetString(buffer, 0, result.Count);
-
-            Console.WriteLine("Message received: " + message);
 
             bool changed = false;
 
@@ -157,7 +138,7 @@ app.Map("/ws", async (HttpContext context, AppDbContext db) =>
 app.Run();
 
 
-/// Send items when client connects
+/// Send items to new client
 async Task SendItems(WebSocket socket, AppDbContext db)
 {
     try
@@ -165,8 +146,6 @@ async Task SendItems(WebSocket socket, AppDbContext db)
         var items = await db.Kiran.ToListAsync();
 
         var json = JsonSerializer.Serialize(items);
-
-        Console.WriteLine("Sending items: " + json);
 
         var bytes = Encoding.UTF8.GetBytes(json);
 
@@ -176,10 +155,8 @@ async Task SendItems(WebSocket socket, AppDbContext db)
             true,
             CancellationToken.None);
     }
-    catch (Exception ex)
+    catch
     {
-        Console.WriteLine("DB ERROR: " + ex.Message);
-
         var empty = Encoding.UTF8.GetBytes("[]");
 
         await socket.SendAsync(
@@ -190,32 +167,24 @@ async Task SendItems(WebSocket socket, AppDbContext db)
     }
 }
 
-
-/// Broadcast updates to all clients
+/// Broadcast updates
 async Task Broadcast(AppDbContext db)
 {
-    try
+    var items = await db.Kiran.ToListAsync();
+
+    var json = JsonSerializer.Serialize(items);
+
+    var bytes = Encoding.UTF8.GetBytes(json);
+
+    foreach (var client in clients.Values)
     {
-        var items = await db.Kiran.ToListAsync();
-
-        var json = JsonSerializer.Serialize(items);
-
-        var bytes = Encoding.UTF8.GetBytes(json);
-
-        foreach (var client in clients.Values)
+        if (client.State == WebSocketState.Open)
         {
-            if (client.State == WebSocketState.Open)
-            {
-                await client.SendAsync(
-                    bytes,
-                    WebSocketMessageType.Text,
-                    true,
-                    CancellationToken.None);
-            }
+            await client.SendAsync(
+                bytes,
+                WebSocketMessageType.Text,
+                true,
+                CancellationToken.None);
         }
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine("Broadcast error: " + ex.Message);
     }
 }
