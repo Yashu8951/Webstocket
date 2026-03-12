@@ -97,5 +97,6 @@ app.Map("/ws", async (HttpContext context, IServiceScopeFactory scopeFactory) =>
 
     Console.WriteLine("Client disconnected");
 });
+// app.MapGet("/items", async (AppDbContext db) => await db.Kiran.ToListAsync());
 
 app.Run();
