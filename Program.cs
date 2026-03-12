@@ -1,10 +1,10 @@
-
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using WebApplication1.Data;
 using WebApplication1.Models;
+using System.Collections.Concurrent;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -12,7 +12,7 @@ var builder = WebApplication.CreateBuilder(args);
 var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
 builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 
-/// PostgreSQL URL from Railway
+/// Get PostgreSQL URL
 var databaseUrl =
     Environment.GetEnvironmentVariable("DATABASE_URL") ??
     Environment.GetEnvironmentVariable("DATABASE_PUBLIC_URL") ??
@@ -20,10 +20,10 @@ var databaseUrl =
 
 if (string.IsNullOrEmpty(databaseUrl))
 {
-    throw new Exception("DATABASE_URL not found");
+    throw new Exception("DATABASE_URL not found in environment variables");
 }
 
-/// Convert Railway URL → Npgsql format
+/// Normalize postgres URL
 databaseUrl = databaseUrl.Replace("postgresql://", "postgres://");
 
 var uri = new Uri(databaseUrl);
@@ -37,13 +37,15 @@ var connectionString =
     $"Password={userInfo[1]};" +
     $"SSL Mode=Require;Trust Server Certificate=true";
 
+Console.WriteLine("PostgreSQL Connected");
+
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(connectionString));
 
 var app = builder.Build();
 
-/// WebSocket clients list
-var clients = new List<WebSocket>();
+/// Thread-safe client list
+var clients = new ConcurrentBag<WebSocket>();
 
 app.UseWebSockets(new WebSocketOptions
 {
@@ -73,7 +75,7 @@ app.Map("/ws", async (HttpContext context, IServiceScopeFactory scopeFactory) =>
 
     try
     {
-        /// Send initial device list
+        /// Send initial data
         var items = await db.Kiran.ToListAsync();
         var json = JsonSerializer.Serialize(items);
 
@@ -90,11 +92,6 @@ app.Map("/ws", async (HttpContext context, IServiceScopeFactory scopeFactory) =>
 
             if (result.MessageType == WebSocketMessageType.Close)
             {
-                await socket.CloseAsync(
-                    WebSocketCloseStatus.NormalClosure,
-                    "Closed",
-                    CancellationToken.None
-                );
                 break;
             }
 
@@ -106,7 +103,7 @@ app.Map("/ws", async (HttpContext context, IServiceScopeFactory scopeFactory) =>
             {
                 var doc = JsonDocument.Parse(message);
 
-                /// CONNECT ALL / DISCONNECT ALL
+                /// CONNECT ALL
                 if (doc.RootElement.TryGetProperty("action", out var actionProp))
                 {
                     var action = actionProp.GetString();
@@ -116,9 +113,7 @@ app.Map("/ws", async (HttpContext context, IServiceScopeFactory scopeFactory) =>
                         var devices = await db.Kiran.ToListAsync();
 
                         foreach (var d in devices)
-                        {
                             d.Status = 1;
-                        }
 
                         await db.SaveChangesAsync();
                     }
@@ -128,15 +123,13 @@ app.Map("/ws", async (HttpContext context, IServiceScopeFactory scopeFactory) =>
                         var devices = await db.Kiran.ToListAsync();
 
                         foreach (var d in devices)
-                        {
                             d.Status = 0;
-                        }
 
                         await db.SaveChangesAsync();
                     }
                 }
 
-                /// SINGLE DEVICE TOGGLE
+                /// SINGLE DEVICE
                 else
                 {
                     var data = JsonSerializer.Deserialize<Kiran>(message);
@@ -154,13 +147,12 @@ app.Map("/ws", async (HttpContext context, IServiceScopeFactory scopeFactory) =>
                     }
                 }
 
-                /// GET UPDATED DATA
+                /// Broadcast update
                 var updated = await db.Kiran.ToListAsync();
                 var updatedJson = JsonSerializer.Serialize(updated);
                 var bytes = Encoding.UTF8.GetBytes(updatedJson);
 
-                /// BROADCAST TO ALL CLIENTS
-                foreach (var client in clients.ToList())
+                foreach (var client in clients)
                 {
                     if (client.State == WebSocketState.Open)
                     {
@@ -185,8 +177,6 @@ app.Map("/ws", async (HttpContext context, IServiceScopeFactory scopeFactory) =>
     }
 
     Console.WriteLine("Client disconnected");
-
-    clients.Remove(socket);
 });
 
 app.Run();
