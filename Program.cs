@@ -7,21 +7,19 @@ using WebApplication1.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
-/// Railway PORT
 var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
 builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 
-/// Database connection (Railway)
 var connection = Environment.GetEnvironmentVariable("DATABASE_URL");
 
-builder.Services.AddDbContext<AppDbContext>(opt =>
-    opt.UseNpgsql(connection));
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseNpgsql(connection));
 
 var app = builder.Build();
 
 app.UseWebSockets();
 
-app.MapGet("/", () => "WebSocket server running");
+app.MapGet("/", () => "WebSocket running");
 
 app.Map("/ws", async (HttpContext context, AppDbContext db) =>
 {
@@ -30,69 +28,81 @@ app.Map("/ws", async (HttpContext context, AppDbContext db) =>
 
     var socket = await context.WebSockets.AcceptWebSocketAsync();
 
-    Console.WriteLine("Client Connected");
-
-    /// Send all items when client connects
-    var items = await db.Kiran.ToListAsync();
-
-    var json = JsonSerializer.Serialize(items);
-
-    await socket.SendAsync(
-        Encoding.UTF8.GetBytes(json),
-        WebSocketMessageType.Text,
-        true,
-        CancellationToken.None
-    );
+    Console.WriteLine("Client connected");
 
     var buffer = new byte[1024];
 
-    while (socket.State == WebSocketState.Open)
+    try
     {
-        var result = await socket.ReceiveAsync(buffer, CancellationToken.None);
+        /// Send current data first
+        var items = await db.Kiran.ToListAsync();
 
-        if (result.MessageType == WebSocketMessageType.Close)
-        {
-            await socket.CloseAsync(
-                WebSocketCloseStatus.NormalClosure,
-                "Closed",
-                CancellationToken.None
-            );
-            break;
-        }
-
-        var message = Encoding.UTF8.GetString(buffer, 0, result.Count);
-
-        Console.WriteLine("Received: " + message);
-
-        /// Update device
-        var data = JsonSerializer.Deserialize<Kiran>(message);
-
-        if (data != null)
-        {
-            var item = await db.Kiran
-                .FirstOrDefaultAsync(x => x.ItemId == data.ItemId);
-
-            if (item != null)
-            {
-                item.Status = data.Status;
-                await db.SaveChangesAsync();
-            }
-        }
-
-        /// Send updated list
-        var updated = await db.Kiran.ToListAsync();
-
-        var updatedJson = JsonSerializer.Serialize(updated);
+        var json = JsonSerializer.Serialize(items);
 
         await socket.SendAsync(
-            Encoding.UTF8.GetBytes(updatedJson),
+            Encoding.UTF8.GetBytes(json),
             WebSocketMessageType.Text,
             true,
             CancellationToken.None
         );
+
+        while (socket.State == WebSocketState.Open)
+        {
+            var result = await socket.ReceiveAsync(buffer, CancellationToken.None);
+
+            if (result.MessageType == WebSocketMessageType.Close)
+            {
+                await socket.CloseAsync(
+                    WebSocketCloseStatus.NormalClosure,
+                    "Closed",
+                    CancellationToken.None
+                );
+                break;
+            }
+
+            var message = Encoding.UTF8.GetString(buffer, 0, result.Count);
+
+            Console.WriteLine("Received: " + message);
+
+            try
+            {
+                var data = JsonSerializer.Deserialize<Kiran>(message);
+
+                if (data != null)
+                {
+                    var item = await db.Kiran
+                        .FirstOrDefaultAsync(x => x.ItemId == data.ItemId);
+
+                    if (item != null)
+                    {
+                        item.Status = data.Status;
+                        await db.SaveChangesAsync();
+                    }
+                }
+
+                var updated = await db.Kiran.ToListAsync();
+
+                var updatedJson = JsonSerializer.Serialize(updated);
+
+                await socket.SendAsync(
+                    Encoding.UTF8.GetBytes(updatedJson),
+                    WebSocketMessageType.Text,
+                    true,
+                    CancellationToken.None
+                );
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("JSON Error: " + e.Message);
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine("WebSocket Error: " + ex.Message);
     }
 
-    Console.WriteLine("Client Disconnected");
+    Console.WriteLine("Client disconnected");
 });
 
 app.Run();
