@@ -1,3 +1,4 @@
+
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -11,7 +12,7 @@ var builder = WebApplication.CreateBuilder(args);
 var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
 builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 
-/// Get Railway PostgreSQL URL
+/// Railway PostgreSQL URL
 var databaseUrl =
     Environment.GetEnvironmentVariable("DATABASE_URL") ??
     Environment.GetEnvironmentVariable("DATABASE_PUBLIC_URL") ??
@@ -19,10 +20,10 @@ var databaseUrl =
 
 if (string.IsNullOrEmpty(databaseUrl))
 {
-    throw new Exception("DATABASE_URL not found in environment variables");
+    throw new Exception("DATABASE_URL not found");
 }
 
-/// Convert postgresql:// to postgres:// for .NET
+/// Convert URL format → Npgsql format
 databaseUrl = databaseUrl.Replace("postgresql://", "postgres://");
 
 var uri = new Uri(databaseUrl);
@@ -35,8 +36,6 @@ var connectionString =
     $"Username={userInfo[0]};" +
     $"Password={userInfo[1]};" +
     $"SSL Mode=Require;Trust Server Certificate=true";
-
-Console.WriteLine("Database connected");
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(connectionString));
@@ -70,8 +69,9 @@ app.Map("/ws", async (HttpContext context, IServiceScopeFactory scopeFactory) =>
 
     try
     {
-        /// Send initial database data
+        /// Send initial device list
         var items = await db.Kiran.ToListAsync();
+
         var json = JsonSerializer.Serialize(items);
 
         await socket.SendAsync(
@@ -101,22 +101,59 @@ app.Map("/ws", async (HttpContext context, IServiceScopeFactory scopeFactory) =>
 
             try
             {
-                var data = JsonSerializer.Deserialize<Kiran>(message);
+                var doc = JsonDocument.Parse(message);
 
-                if (data != null)
+                /// Handle ALL ON / ALL OFF
+                if (doc.RootElement.TryGetProperty("action", out var actionProp))
                 {
-                    var item = await db.Kiran
-                        .FirstOrDefaultAsync(x => x.ItemId == data.ItemId);
+                    var action = actionProp.GetString();
 
-                    if (item != null)
+                    if (action == "all_on")
                     {
-                        item.Status = data.Status;
+                        var devices = await db.Kiran.ToListAsync();
+
+                        foreach (var d in devices)
+                        {
+                            d.Status = 1;
+                        }
+
+                        await db.SaveChangesAsync();
+                    }
+
+                    else if (action == "all_off")
+                    {
+                        var devices = await db.Kiran.ToListAsync();
+
+                        foreach (var d in devices)
+                        {
+                            d.Status = 0;
+                        }
+
                         await db.SaveChangesAsync();
                     }
                 }
 
-                /// Send updated data
+                /// Handle single device toggle
+                else
+                {
+                    var data = JsonSerializer.Deserialize<Kiran>(message);
+
+                    if (data != null)
+                    {
+                        var item = await db.Kiran
+                            .FirstOrDefaultAsync(x => x.ItemId == data.ItemId);
+
+                        if (item != null)
+                        {
+                            item.Status = data.Status;
+                            await db.SaveChangesAsync();
+                        }
+                    }
+                }
+
+                /// Send updated list
                 var updated = await db.Kiran.ToListAsync();
+
                 var updatedJson = JsonSerializer.Serialize(updated);
 
                 await socket.SendAsync(
@@ -141,3 +178,4 @@ app.Map("/ws", async (HttpContext context, IServiceScopeFactory scopeFactory) =>
 });
 
 app.Run();
+
